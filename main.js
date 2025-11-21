@@ -23,8 +23,63 @@ const range = (N) => {
 };
 
 const pressedKeys = new Set();
+
+const pointerStart = new Map();
+const DEAD = 10;
+
+function handlePointerDown(e) {
+  pointerStart.set(e.pointerId, { x: e.clientX, y: e.clientY });
+}
+
+function handlePointerMove(e) {
+  const start = pointerStart.get(e.pointerId);
+  if (!start) return;
+
+  const dx = e.clientX - start.x;
+  const dy = e.clientY - start.y;
+
+  const ids = [...pointerStart.keys()];
+  const first = ids[0];
+  const second = ids[1];
+
+  // Reset all virtual keys
+  for (const k of [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "PageUp",
+    "PageDown",
+  ])
+    pressedKeys.delete(k);
+
+  if (e.pointerId === first) {
+    // Finger 1 = Arrow
+    if (Math.abs(dx) > DEAD)
+      pressedKeys.add(dx < 0 ? "ArrowLeft" : "ArrowRight");
+    if (Math.abs(dy) > DEAD) pressedKeys.add(dy < 0 ? "ArrowUp" : "ArrowDown");
+  }
+
+  if (e.pointerId === second) {
+    // Finger 2 = PageUp/Down
+    if (Math.abs(dy) > DEAD) pressedKeys.add(dy < 0 ? "PageUp" : "PageDown");
+  }
+}
+
+function handlePointerUp(e) {
+  pointerStart.delete(e.pointerId);
+  for (const k of [
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "PageUp",
+    "PageDown",
+  ])
+    pressedKeys.delete(k);
+}
+
 function handleKeydown(e) {
-  // falls Pfeiltasten nicht scrollen sollen:
   if (
     [
       "ArrowUp",
@@ -43,6 +98,10 @@ function handleKeydown(e) {
 function handleKeyup(e) {
   pressedKeys.delete(e.key);
 }
+
+window.addEventListener("pointerdown", handlePointerDown);
+window.addEventListener("pointermove", handlePointerMove);
+window.addEventListener("pointerup", handlePointerUp);
 
 window.addEventListener("keydown", handleKeydown);
 window.addEventListener("keyup", handleKeyup);
@@ -190,8 +249,8 @@ class Helicopter extends Stuff {
     );
     this.pos = sat(
       add(this.pos, this.speed),
-      p(0, 0),
-      p(innerWidth + 3000, innerHeight - 150)
+      p(-2000, 0),
+      p(innerWidth + 6000, innerHeight - 150)
     );
     //    m.redraw(); // wichtig: Mithril sagen, dass sich was geändert hat
   }
@@ -453,8 +512,8 @@ class House {
 }
 
 class Background {
-  points = range(130).map((i) => random() * innerHeight*.3);
-  view() {
+  points = range(130).map((i) => random() * innerHeight * 0.3);
+  view({ attrs: { color } }) {
     return g(
       { transform: `translate(-1130 ${innerHeight - 200})` },
       polygon({}),
@@ -463,7 +522,7 @@ class Background {
           "0,1000 " +
           this.points.map((p, i) => `${i * 100},${-p}`).join(" ") +
           ` ${(this.points.length - 1) * 100},1000`,
-        fill: "rgba(25, 107, 51, 1)",
+        fill: color,
       })
     );
   }
@@ -487,7 +546,15 @@ m.mount(document.body, {
             (objs[2] ? -objs[2].pos.x : 0) + innerWidth * 0.5
           } 0)`,
         },
-        m(Background),
+        g(
+          {
+            transform: `translate(${
+              (objs[2] ? 0.75 * objs[2].pos.x : 0) + innerWidth * 0.5
+            } -400)`,
+          },
+          m(Background, { color: "#a0d8ff" })
+        ),
+        m(Background, { color: "rgba(25, 107, 51, 1)" }),
         m(Helipad),
         m(Tent)
       ),
