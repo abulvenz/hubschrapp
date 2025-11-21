@@ -4,6 +4,7 @@
   "description": "",
   "scripts": {
     "start": "parcel index.html --open",
+    "gh-pages": "rm -rf docs && parcel build index.html --dist-dir docs --public-url https://abulvenz.github.io/hubschrapp/",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
