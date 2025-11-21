@@ -2,8 +2,19 @@ import m from "mithril";
 import tagl, { view } from "tagl-mithril";
 import rotorSound from "url:./rotor2.mp3";
 import music from "url:./music.mp3";
-const { svg, g, path, circle, rect, ellipse, polygon, line, audio, animate } =
-  tagl(m);
+const {
+  svg,
+  g,
+  path,
+  circle,
+  rect,
+  ellipse,
+  polygon,
+  line,
+  audio,
+  animate,
+  text,
+} = tagl(m);
 const { sin, cos, PI, min, max, random } = Math;
 let t = 0;
 
@@ -455,10 +466,10 @@ class Helicopter extends Stuff {
 
 class Helipad extends Stuff {
   view() {
-    return g({ transform: `translate(${20} ${innerHeight - 150})` }, [
+    return g({ transform: `translate(${140} ${innerHeight - 60})` }, [
       ellipse({
-        cx: "130",
-        cy: "90",
+        cx: "0",
+        cy: "0",
         rx: "110",
         ry: "28",
         fill: "#f6f7ff",
@@ -466,8 +477,8 @@ class Helipad extends Stuff {
         "stroke-width": "4",
       }),
       ellipse({
-        cx: "130",
-        cy: "90",
+        cx: "0",
+        cy: "0",
         rx: "100",
         ry: "24",
         fill: "none",
@@ -475,7 +486,7 @@ class Helipad extends Stuff {
         "stroke-width": "1.5",
         opacity: "0.18",
       }),
-      g({ transform: "translate(130,90) scale(1,.35) skewX(8)" }, [
+      g({ transform: "translate(0,0) scale(1,.35) skewX(8)" }, [
         rect({
           x: "-32",
           y: "-45",
@@ -505,27 +516,136 @@ class Helipad extends Stuff {
   }
 }
 
-class House {
+class Moon {
   view() {
-    return g([]);
+    return g(
+      {
+        transform: `translate(${innerWidth * 0.5} ${
+          innerHeight * 0.2
+        }) scale(1.2)`,
+      },
+      path({
+        d: "M100,40\n       A60,60 0 1,1 100,160\n       A45,60 0 1,0 100,40\n       Z",
+        fill: "#f0e9d8",
+      })
+    );
+  }
+}
+
+class House {
+  height = 12;
+  width = 6;
+  view({ attrs: { x, y } }) {
+    return g(
+      { transform: `translate(${-100} ${innerHeight - 150})rotate(180)` },
+      rect({
+        x: 0,
+        y: 0,
+        width: this.width * 20,
+        height: this.height * 20,
+        fill: "#d8c8c0",
+        stroke: "#000",
+      }),
+      range(this.height).map((j) =>
+        range(this.width).map((i) =>
+          rect({
+            x: i * 20 + 5,
+            y: j * 20 + 7.5,
+            width: 10,
+            height: 10,
+            fill: "#000",
+            stroke: "#000",
+          })
+        )
+      )
+    );
+  }
+}
+
+class Controls extends Stuff {
+  start = p(0, 0);
+  dir = p(0, 0);
+  move(keys) {
+    this.start = pointerStart.get(pointerStart.keys().next().value) || p(0, 0);
+    // pointerStart.get(1) || p(0, 0);
+    this.dir = p(this.start.x, this.start.y);
+    keys.forEach((key) => {
+      switch (key) {
+        case "ArrowUp":
+          this.dir.y -= 30;
+          break;
+        case "ArrowDown":
+          this.dir.y += 30;
+          break;
+        case "ArrowLeft":
+          this.dir.x -= 30;
+          break;
+        case "ArrowRight":
+          this.dir.x += 30;
+          break;
+      }
+    });
+  }
+  view() {
+    return g(
+      {
+        transform: `translate(0 ${-150})`,
+      },
+      circle({
+        cx: this.start.x,
+        cy: this.start.y,
+        r: 18,
+        fill: "#000",
+        opacity: "0.3",
+      }),
+      line({
+        x1: this.start.x,
+        y1: this.start.y,
+        x2: this.dir.x,
+        y2: this.dir.y,
+        stroke: "#000",
+        "stroke-width": "6",
+        "stroke-linecap": "round",
+        opacity: "0.5",
+      }),
+      circle({
+        cx: this.dir.x,
+        cy: this.dir.y,
+        r: 18,
+        fill: "#000",
+        opacity: "0.8",
+      })
+      // text(
+      //   { x: 20, y: 40, fill: "#000", "font-size": "24" },
+      //   "Steuerung: " + JSON.stringify(this.dir)
+      // )
+    );
   }
 }
 
 class Background {
   points = range(130).map((i) => random() * innerHeight * 0.3);
+  offset = 1000;
+  shiftX = 1130;
   view({ attrs: { color } }) {
     return g(
-      { transform: `translate(-1130 ${innerHeight - 200})` },
+      { transform: `translate(-${this.shiftX} ${innerHeight - 200})` },
       polygon({}),
       polygon({
         points:
-          "0,1000 " +
+          `0,${this.offset} ` +
           this.points.map((p, i) => `${i * 100},${-p}`).join(" ") +
-          ` ${(this.points.length - 1) * 100},1000`,
+          ` ${(this.points.length - 1) * 100},${this.offset}`,
         fill: color,
       })
     );
   }
+}
+
+class Lake extends Background {
+  points = range(130).map((i) => random() * 100);
+  offset = 0;
+  shiftX = 13500;
 }
 
 setInterval(() => {
@@ -540,6 +660,7 @@ m.mount(document.body, {
   view: () => [
     svg(
       { width: innerWidth, height: innerHeight },
+      m(Moon),
       g(
         {
           transform: `translate(${
@@ -552,13 +673,19 @@ m.mount(document.body, {
               (objs[2] ? 0.75 * objs[2].pos.x : 0) + innerWidth * 0.5
             } -400)`,
           },
-          m(Background, { color: "#a0d8ff" })
+          m(Background, { color: "rgba(43, 44, 45, 1)" })
         ),
         m(Background, { color: "rgba(25, 107, 51, 1)" }),
+        g(
+          { transform: `rotate(180)translate( 0 ${-innerHeight * 1.7})` },
+          m(Lake, { color: "rgba(10, 80, 120, 0.8)" })
+        ),
+        m(Tent),
+        m(House),
         m(Helipad),
-        m(Tent)
       ),
-      m(Helicopter)
+      m(Helicopter),
+      m(Controls)
     ),
     audio({ src: rotorSound, autoplay: true, loop: true }),
     audio({ src: music, autoplay: true, loop: true }),
