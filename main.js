@@ -95,6 +95,21 @@ function handlePointerUp(e) {
     pressedKeys.delete(k);
 }
 
+function resetGame() {
+  if (!heli) return;
+  heli.crashed = false;
+  heli.crashTicks = 0;
+  heli.crashParts = [];
+  heli.smokeParts = [];
+  heli.cracks = [];
+  heli.crashPos = null;
+  heli.pos = p(180, innerHeight - 150);
+  heli.speed = p(0, 0);
+  heli.acc = p(0, 0);
+  heli.dir = -1;
+  heli.length = 50;
+}
+
 function handleKeydown(e) {
   if (
     [
@@ -107,6 +122,10 @@ function handleKeydown(e) {
     ].includes(e.key)
   ) {
     e.preventDefault();
+  }
+  if ((e.key === "r" || e.key === "R") && heli && heli.crashed) {
+    resetGame();
+    return;
   }
   pressedKeys.add(e.key);
 }
@@ -218,6 +237,12 @@ class Helicopter extends Stuff {
   dir = -1;
   length = 50;
   vscale = 90;
+  crashed = false;
+  crashTicks = 0;
+  crashParts = [];
+  smokeParts = [];
+  cracks = [];
+  crashPos = null;
 
   constructor() {
     super();
@@ -225,7 +250,108 @@ class Helicopter extends Stuff {
     console.log(this.pos);
   }
 
+  crash() {
+    this.crashed = true;
+    this.crashTicks = 0;
+    this.crashPos = p(this.pos.x, this.pos.y);
+    this.speed = p(0, 0);
+
+    // Hubschrauber-Teile mit Geschwindigkeiten
+    const spread = 8;
+    this.crashParts = [
+      // Rumpf
+      { el: "body", x: 0, y: 0, vx: (random() - 0.5) * spread, vy: -random() * 3, r: 0, vr: (random() - 0.5) * 8 },
+      // Cockpit-Fenster
+      { el: "cockpit", x: -30, y: -12, vx: -3 - random() * spread, vy: -4 - random() * 3, r: 0, vr: (random() - 0.5) * 12 },
+      // Heckausleger
+      { el: "tail", x: 50, y: -4, vx: 4 + random() * spread, vy: -random() * 2, r: 0, vr: (random() - 0.5) * 6 },
+      // Heckleitwerk
+      { el: "fin", x: 120, y: -10, vx: 6 + random() * spread, vy: -3 - random() * 4, r: 0, vr: (random() - 0.5) * 15 },
+      // Heckrotor
+      { el: "tailrotor", x: 140, y: 0, vx: 8 + random() * 4, vy: -5 - random() * 3, r: 0, vr: 20 + random() * 20 },
+      // Rotormast + Nabe
+      { el: "mast", x: 0, y: -20, vx: (random() - 0.5) * 4, vy: -8 - random() * 6, r: 0, vr: (random() - 0.5) * 5 },
+      // Rotorblatt 1
+      { el: "blade", x: -60, y: -20, vx: -8 - random() * spread, vy: -10 - random() * 5, r: 0, vr: 15 + random() * 20 },
+      // Rotorblatt 2
+      { el: "blade", x: 60, y: -20, vx: 8 + random() * spread, vy: -10 - random() * 5, r: 0, vr: -15 - random() * 20 },
+      // Kufe links
+      { el: "skidL", x: -30, y: 10, vx: -3 - random() * 3, vy: 2 + random() * 2, r: 0, vr: (random() - 0.5) * 10 },
+      // Kufe rechts
+      { el: "skidR", x: 30, y: 10, vx: 3 + random() * 3, vy: 2 + random() * 2, r: 0, vr: (random() - 0.5) * 10 },
+    ];
+
+    // Rauch-Partikel
+    this.smokeParts = range(20).map(() => ({
+      x: (random() - 0.5) * 40,
+      y: 0,
+      vx: (random() - 0.5) * 2,
+      vy: -1 - random() * 3,
+      size: 5 + random() * 10,
+      maxSize: 20 + random() * 30,
+      opacity: 0.8 + random() * 0.2,
+      delay: random() * 30, // verzögerter Start
+      color: random() < 0.3 ? "#ff6633" : (random() < 0.5 ? "#555" : "#333"),
+    }));
+
+    // Risse auf dem Bildschirm — vom Zentrum nach außen
+    const cx = innerWidth * 0.5;
+    const cy = this.pos.y;
+    this.cracks = range(6).map(() => {
+      const angle = random() * PI * 2;
+      const len = 200 + random() * 400;
+      const segments = 4 + Math.floor(random() * 4);
+      let pts = [{ x: cx, y: cy }];
+      for (let i = 1; i <= segments; i++) {
+        const frac = i / segments;
+        const jitter = (random() - 0.5) * 60;
+        pts.push({
+          x: cx + cos(angle + jitter * 0.01) * len * frac + jitter,
+          y: cy + sin(angle + jitter * 0.01) * len * frac + (random() - 0.5) * 40,
+        });
+      }
+      // Sub-branches
+      const branches = [];
+      for (let i = 1; i < pts.length - 1; i++) {
+        if (random() > 0.5) {
+          const bAngle = angle + (random() - 0.5) * 1.5;
+          const bLen = 40 + random() * 80;
+          branches.push({
+            from: pts[i],
+            to: { x: pts[i].x + cos(bAngle) * bLen, y: pts[i].y + sin(bAngle) * bLen },
+          });
+        }
+      }
+      return { pts, branches, progress: 0 };
+    });
+  }
+
   move(keys) {
+    if (this.crashed) {
+      this.crashTicks++;
+      // Teile-Physik
+      for (const part of this.crashParts) {
+        part.x += part.vx;
+        part.y += part.vy;
+        part.vy += 0.5; // Schwerkraft
+        part.r += part.vr;
+      }
+      // Rauch-Physik
+      for (const s of this.smokeParts) {
+        if (this.crashTicks < s.delay) continue;
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vx += (random() - 0.5) * 0.3;
+        s.size = min(s.size + 0.5, s.maxSize);
+        s.opacity = max(0, s.opacity - 0.008);
+      }
+      // Risse breiten sich aus
+      for (const c of this.cracks) {
+        if (c.progress < 1) c.progress = min(1, c.progress + 0.04);
+      }
+      return;
+    }
+
     if (keys.size > 0) {
       console.log("acc", this.acc);
       console.log("speed", this.speed);
@@ -269,11 +395,78 @@ class Helicopter extends Stuff {
       p(-2000, 0),
       p(innerWidth + 6000, innerHeight - 150)
     );
-    //    m.redraw(); // wichtig: Mithril sagen, dass sich was geändert hat
+
+    // Crash-Detection
+    if (this.pos.y >= innerHeight - 151) {
+      const onHelipad = this.pos.x >= 30 && this.pos.x <= 250;
+      const tiltAngle = Math.abs(this.speed.x * this.dir);
+      if (!onHelipad || tiltAngle > 3) {
+        this.crash();
+      }
+    }
+  }
+
+  renderPart(part) {
+    const els = {
+      body: () => rect({ x: -60, y: -25, width: 120, height: 50, rx: 25, ry: 25, fill: "#2b7bbb" }),
+      cockpit: () => g(
+        ellipse({ cx: 0, cy: 0, rx: 25, ry: 18, fill: "#ffffff", opacity: 0.8 }),
+        path({ d: "M-20 4 Q0 -10 20 -2", fill: "none", stroke: "#2b7bbb", "stroke-width": "2" }),
+      ),
+      tail: () => rect({ x: -35, y: -5, width: 70, height: 10, fill: "#2b7bbb" }),
+      fin: () => polygon({ points: "0,-10 20,-20 20,20 0,10", fill: "#2b7bbb" }),
+      tailrotor: () => g(
+        circle({ cx: 0, cy: 0, r: 6, fill: "#fff", stroke: "#2b7bbb", "stroke-width": 2 }),
+        rect({ x: -2, y: -20, width: 4, height: 40, fill: "#333" }),
+      ),
+      mast: () => g(
+        rect({ x: -5, y: -20, width: 10, height: 20, fill: "#2b7bbb" }),
+        circle({ cx: 0, cy: -20, r: 6, fill: "#fff", stroke: "#2b7bbb", "stroke-width": 2 }),
+      ),
+      blade: () => line({ x1: 0, y1: 0, x2: 100, y2: 0, stroke: "#333", "stroke-width": 4, "stroke-linecap": "round" }),
+      skidL: () => g(
+        line({ x1: 0, y1: 0, x2: 10, y2: 20, stroke: "#333", "stroke-width": 4, "stroke-linecap": "round" }),
+        line({ x1: -30, y1: 20, x2: 30, y2: 20, stroke: "#333", "stroke-width": 5, "stroke-linecap": "round" }),
+      ),
+      skidR: () => g(
+        line({ x1: 0, y1: 0, x2: -10, y2: 20, stroke: "#333", "stroke-width": 4, "stroke-linecap": "round" }),
+        line({ x1: -30, y1: 20, x2: 30, y2: 20, stroke: "#333", "stroke-width": 5, "stroke-linecap": "round" }),
+      ),
+    };
+    const renderFn = els[part.el];
+    if (!renderFn) return g();
+    return g(
+      { transform: `translate(${part.x} ${part.y}) rotate(${part.r})` },
+      renderFn()
+    );
+  }
+
+  crashView() {
+    const cx = innerWidth * 0.5;
+    const cy = this.crashPos.y;
+    return g(
+      // Auseinanderfliegende Teile
+      g({ transform: `translate(${cx} ${cy})` },
+        this.crashParts.map((part, i) => this.renderPart(part))
+      ),
+      // Rauch-Partikel
+      g({ transform: `translate(${cx} ${cy})` },
+        this.smokeParts.filter(s => this.crashTicks >= s.delay).map((s, i) =>
+          circle({
+            cx: s.x,
+            cy: s.y,
+            r: s.size,
+            fill: s.color,
+            opacity: s.opacity,
+          })
+        )
+      ),
+    );
   }
 
   view() {
-    //    console.log(this.pos, this.dir);
+    if (this.crashed) return this.crashView();
+
     return g(
       {
         transform: `translate(${this.pos.x * 0 + innerWidth * 0.5} ${
@@ -296,16 +489,7 @@ class Helicopter extends Stuff {
       ),
       g(
         { transform: `rotate(${satv(this.speed.x * this.dir, -30, 30)})` },
-        //point,
         g({ transform: "translate(-140 -60)" }, [
-          //   rect( {
-          //     x: "0",
-          //     y: "0",
-          //     width: "300",
-          //     height: "200",
-          //     fill: "#e0f4ff",
-          //   }),
-          //
           m(
             "ellipse",
             {
@@ -372,7 +556,6 @@ class Helicopter extends Stuff {
               y: "0",
               width: "4",
               height: "40",
-              //            fill: "#2b7bbb",
               transform: `rotate(${t} 0 0)translate(-2 -20)`,
             }),
             rect({
@@ -380,7 +563,6 @@ class Helicopter extends Stuff {
               y: "0",
               width: "40",
               height: "4",
-              //fill: "#2b7bbb",
               transform: `rotate(${t} 0 0)translate(-20 -2 )`,
             })
           ),
@@ -417,22 +599,6 @@ class Helicopter extends Stuff {
             "stroke-width": "4",
             "stroke-linecap": "round",
           }),
-          //   rect({
-          //     x: "60",
-          //     y: "58",
-          //     width: `${sin((t / 180) * PI) * 160}`,
-          //     height: "4",
-          //     fill: "#2b7bbb",
-          //     transform: `rotate(${t} 140 60)`,
-          //   }),
-          //   rect({
-          //     x: "138",
-          //     y: "-20",
-          //     width: "4",
-          //     height: "160",
-          //     fill: "#2b7bbb",
-          //     transform: `rotate(${t} 140 60)`,
-          //   }),
           line({
             x1: "100",
             y1: "130",
@@ -804,6 +970,38 @@ m.mount(document.body, {
           `Gerettet: ${rescued} / ${PERSON_POSITIONS.length}`
         ),
       ),
+      // Crash-Overlay: Risse + Text
+      heli && heli.crashed ? g(
+        // Risse
+        heli.cracks.map((crack) => {
+          const n = Math.floor(crack.pts.length * crack.progress);
+          if (n < 2) return g();
+          const pts = crack.pts.slice(0, n);
+          const d = "M" + pts.map(p => `${p.x},${p.y}`).join(" L");
+          return g(
+            path({ d, fill: "none", stroke: "rgba(255,255,255,0.7)", "stroke-width": "2.5", "stroke-linecap": "round" }),
+            path({ d, fill: "none", stroke: "rgba(255,255,255,0.3)", "stroke-width": "5", "stroke-linecap": "round" }),
+            crack.branches.filter((_, i) => i < n - 1).map(b =>
+              line({ x1: b.from.x, y1: b.from.y, x2: b.to.x, y2: b.to.y,
+                stroke: "rgba(255,255,255,0.5)", "stroke-width": "1.5", "stroke-linecap": "round" })
+            ),
+          );
+        }),
+        // CRASH-Text (nach 60 Ticks ≈ 3 Sekunden)
+        heli.crashTicks > 60 ? g(
+          { transform: `translate(${innerWidth * 0.5} ${innerHeight * 0.4})` },
+          text({ x: 0, y: 0, fill: "#ff2222", "font-size": "90", "font-family": "sans-serif",
+            "font-weight": "bold", "text-anchor": "middle", stroke: "#000", "stroke-width": "3",
+            opacity: min(1, (heli.crashTicks - 60) / 15) },
+            "CRASH!"
+          ),
+          text({ x: 0, y: 50, fill: "#fff", "font-size": "24", "font-family": "sans-serif",
+            "text-anchor": "middle",
+            opacity: min(1, max(0, (heli.crashTicks - 75) / 15)) },
+            "Drücke R zum Neustarten"
+          ),
+        ) : g(),
+      ) : g(),
     ),
     audio({ src: rotorSound, autoplay: true, loop: true }),
     audio({ src: music, autoplay: true, loop: true }),
