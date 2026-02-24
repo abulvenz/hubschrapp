@@ -22,6 +22,49 @@ let rescued = 0;
 
 const lightnings = [];
 let screenFlash = 0;
+let victory = false;
+let victoryTicks = 0;
+let rotorSpeed = 40;
+let rotorAudioEl = null;
+let musicAudioEl = null;
+
+function playFanfare() {
+  const ctx = new AudioContext();
+  const masterGain = ctx.createGain();
+  masterGain.gain.value = 0.5;
+  masterGain.connect(ctx.destination);
+  const melody = [
+    { freq: 392.00, start: 0, dur: 0.25 },
+    { freq: 493.88, start: 0.2, dur: 0.25 },
+    { freq: 587.33, start: 0.4, dur: 0.25 },
+    { freq: 783.99, start: 0.7, dur: 0.4 },
+    { freq: 587.33, start: 1.1, dur: 0.2 },
+    { freq: 783.99, start: 1.35, dur: 1.2 },
+  ];
+  melody.forEach(n => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "triangle";
+    osc.frequency.value = n.freq;
+    gain.gain.setValueAtTime(0.35, ctx.currentTime + n.start);
+    gain.gain.setValueAtTime(0.35, ctx.currentTime + n.start + n.dur * 0.6);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.start + n.dur);
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start(ctx.currentTime + n.start);
+    osc.stop(ctx.currentTime + n.start + n.dur + 0.05);
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = "sine";
+    osc2.frequency.value = n.freq * 2;
+    gain2.gain.setValueAtTime(0.12, ctx.currentTime + n.start);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + n.start + n.dur);
+    osc2.connect(gain2);
+    gain2.connect(masterGain);
+    osc2.start(ctx.currentTime + n.start);
+    osc2.stop(ctx.currentTime + n.start + n.dur + 0.05);
+  });
+}
 
 const PERSON_POSITIONS = [800, 1400, 2200, 3000, 4000];
 const PERSON_COLORS = ["#ff6633", "#ff3366", "#ffcc00", "#33ccff", "#cc66ff"];
@@ -86,6 +129,7 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp(e) {
+  const start = pointerStart.get(e.pointerId);
   pointerStart.delete(e.pointerId);
   for (const k of [
     "ArrowUp",
@@ -96,6 +140,14 @@ function handlePointerUp(e) {
     "PageDown",
   ])
     pressedKeys.delete(k);
+  // Tap zum Neustarten bei Crash (Mobile)
+  if (heli && heli.crashed && start) {
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (dx * dx + dy * dy < DEAD * DEAD) {
+      resetGame();
+    }
+  }
 }
 
 function resetGame() {
@@ -126,6 +178,11 @@ function resetGame() {
   }
   lightnings.length = 0;
   screenFlash = 0;
+  victory = false;
+  victoryTicks = 0;
+  rotorSpeed = 40;
+  if (rotorAudioEl) { rotorAudioEl.volume = 1; rotorAudioEl.play(); }
+  if (musicAudioEl) { musicAudioEl.play(); }
 }
 
 function handleKeydown(e) {
@@ -370,6 +427,16 @@ class Helicopter extends Stuff {
       return;
     }
 
+    if (victory) {
+      this.speed = scale(add(this.speed, p(0, 0.2)), 0.98);
+      this.pos = sat(add(this.pos, this.speed), p(-2000, 0), p(innerWidth + 6000, innerHeight - 150));
+      if (this.pos.y >= innerHeight - 151) {
+        this.pos.y = innerHeight - 150;
+        this.speed = p(0, 0);
+      }
+      return;
+    }
+
     if (keys.size > 0) {
       console.log("acc", this.acc);
       console.log("speed", this.speed);
@@ -400,6 +467,10 @@ class Helicopter extends Stuff {
           break;
       }
     });
+    // Seilwinde automatisch einfahren wenn Person am Haken
+    if (objs.some(o => o.attached !== undefined && o.attached)) {
+      this.length = max(this.length - 5, 50);
+    }
     this.speed = scale(
       sat(
         add(this.speed, this.acc),
@@ -415,7 +486,7 @@ class Helicopter extends Stuff {
     );
 
     // Crash-Detection
-    if (this.pos.y >= innerHeight - 151) {
+    if (!victory && this.pos.y >= innerHeight - 151) {
       const onHelipad = this.pos.x >= 30 && this.pos.x <= 250;
       const tiltAngle = Math.abs(this.speed.x * this.dir);
       if (!onHelipad || tiltAngle > 3) {
@@ -508,7 +579,7 @@ class Helicopter extends Stuff {
       g(
         { transform: `rotate(${satv(this.speed.x * this.dir, -30, 30)})` },
         g({ transform: "translate(-140 -60)" }, [
-          m(
+          rotorSpeed > 0 ? m(
             "ellipse",
             {
               cx: "140",
@@ -523,7 +594,13 @@ class Helicopter extends Stuff {
               dur: "0.1s",
               repeatcount: "indefinite",
             })
-          ),
+          ) : ellipse({
+            cx: "140",
+            cy: "60",
+            rx: "100",
+            ry: "5",
+            fill: "rgba(0,0,0,0.15)",
+          }),
           rect({
             x: "80",
             y: "80",
@@ -752,7 +829,11 @@ class House {
             stroke: "#000",
           })
         )
-      )
+      ),
+      // Blitzableiter
+      line({ x1: 60, y1: 240, x2: 60, y2: 280, stroke: "#777", "stroke-width": 2.5, "stroke-linecap": "round" }),
+      line({ x1: 52, y1: 260, x2: 68, y2: 260, stroke: "#777", "stroke-width": 2 }),
+      circle({ cx: 60, cy: 280, r: 3, fill: "#ddd", stroke: "#999", "stroke-width": 1 }),
     );
   }
 }
@@ -970,17 +1051,54 @@ class Person extends Stuff {
 }
 
 setInterval(() => {
-  t = (t + 40) % 360;
+  t = (t + rotorSpeed) % 360;
   objs.forEach((o) => o.move(pressedKeys));
   //console.log(pressedKeys);
+
+  // Ertrunkene Personen im Wasserbereich respawnen
+  for (const obj of objs) {
+    if (obj.sunk !== undefined && obj.sunk && obj.sinkProgress >= 1) {
+      const viewX = heli ? heli.pos.x : 0;
+      const dir = random() > 0.5 ? 1 : -1;
+      obj.worldX = satv(viewX + dir * (innerWidth + 500 + random() * 1500), 600, 5000);
+      obj.worldY = obj.waterY;
+      obj.sunk = false;
+      obj.sinkProgress = 0;
+    }
+  }
+
+  // Sieg-Check: Alle gerettet UND Heli auf dem Helipad gelandet
+  if (!victory && rescued >= PERSON_POSITIONS.length
+      && heli && !heli.crashed
+      && heli.pos.y >= innerHeight - 151
+      && heli.pos.x >= 30 && heli.pos.x <= 250) {
+    victory = true;
+    victoryTicks = 0;
+    if (musicAudioEl) musicAudioEl.pause();
+    playFanfare();
+  }
+  if (victory) {
+    victoryTicks++;
+    rotorSpeed = max(0, rotorSpeed - 0.5);
+    if (rotorAudioEl) {
+      rotorAudioEl.volume = max(0, rotorSpeed / 40);
+      if (rotorSpeed <= 0) rotorAudioEl.pause();
+    }
+  }
 
   // Blitz-System
   if (screenFlash > 0) screenFlash = max(0, screenFlash - 0.15);
 
-  if (random() < 0.025) {
+  if (!victory && random() < 0.025) {
     const viewX = heli ? heli.pos.x : innerWidth / 2;
-    const strikeX = viewX + (random() - 0.5) * innerWidth * 1.5;
-    const strikeY = innerHeight - 50 - random() * 100;
+    let strikeX = viewX + (random() - 0.5) * innerWidth * 1.5;
+    let strikeY = innerHeight - 50 - random() * 100;
+
+    // Blitzableiter auf dem Hochhaus zieht Blitze in Basisnähe an
+    if (strikeX < 400) {
+      strikeX = -160;
+      strikeY = innerHeight - 430;
+    }
 
     // Zackiger Blitz von oben nach unten
     const numSegs = 6 + Math.floor(random() * 6);
@@ -1135,9 +1253,23 @@ m.mount(document.body, {
           ),
         ) : g(),
       ) : g(),
+      // Sieg-Overlay
+      victory ? g(
+        { transform: `translate(${innerWidth * 0.5} ${innerHeight * 0.4})` },
+        text({ x: 0, y: 0, fill: "#33ff66", "font-size": "80", "font-family": "sans-serif",
+          "font-weight": "bold", "text-anchor": "middle", stroke: "#006622", "stroke-width": "3",
+          opacity: min(1, victoryTicks / 30) },
+          "Krise bewältigt!"
+        ),
+        text({ x: 0, y: 55, fill: "#fff", "font-size": "28", "font-family": "sans-serif",
+          "text-anchor": "middle",
+          opacity: min(1, max(0, (victoryTicks - 40) / 20)) },
+          `Alle ${PERSON_POSITIONS.length} Personen gerettet!`
+        ),
+      ) : g(),
     ),
-    audio({ src: rotorSound, autoplay: true, loop: true }),
-    audio({ src: music, autoplay: true, loop: true }),
+    audio({ src: rotorSound, autoplay: true, loop: true, oncreate: (vnode) => { rotorAudioEl = vnode.dom; } }),
+    audio({ src: music, autoplay: true, loop: true, oncreate: (vnode) => { musicAudioEl = vnode.dom; } }),
   ],
 });
 
