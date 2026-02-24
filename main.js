@@ -20,6 +20,9 @@ let t = 0;
 let heli = null;
 let rescued = 0;
 
+const lightnings = [];
+let screenFlash = 0;
+
 const PERSON_POSITIONS = [800, 1400, 2200, 3000, 4000];
 const PERSON_COLORS = ["#ff6633", "#ff3366", "#ffcc00", "#33ccff", "#cc66ff"];
 
@@ -109,13 +112,20 @@ function resetGame() {
   heli.dir = -1;
   heli.length = 50;
 
-  // Personen zurücksetzen die am Seil hingen
+  // Personen zurücksetzen die am Seil hingen oder untergegangen sind
   for (const obj of objs) {
     if (obj.attached !== undefined && obj.attached) {
       obj.attached = false;
       obj.worldY = obj.waterY;
     }
+    if (obj.sunk !== undefined && obj.sunk) {
+      obj.sunk = false;
+      obj.sinkProgress = 0;
+      obj.worldY = obj.waterY;
+    }
   }
+  lightnings.length = 0;
+  screenFlash = 0;
 }
 
 function handleKeydown(e) {
@@ -839,6 +849,8 @@ class Person extends Stuff {
   attached = false;
   rescueX = 0;
   walkProgress = 0;
+  sunk = false;
+  sinkProgress = 0;
 
   oninit(vnode) {
     this.worldX = vnode.attrs.wx;
@@ -850,6 +862,10 @@ class Person extends Stuff {
   move() {
     if (this.rescued) {
       if (this.walkProgress < 1) this.walkProgress += 0.015;
+      return;
+    }
+    if (this.sunk) {
+      this.sinkProgress = min(this.sinkProgress + 0.02, 1);
       return;
     }
     if (!heli) return;
@@ -911,6 +927,20 @@ class Person extends Stuff {
       );
     }
 
+    if (this.sunk) {
+      if (this.sinkProgress >= 1) return g();
+      const sinkY = this.sinkProgress * 50;
+      const opacity = 1 - this.sinkProgress;
+      return g(
+        { transform: `translate(${this.worldX} ${this.worldY + sinkY})`, opacity },
+        circle({ cx: -5, cy: -30 - sin(t / 10) * 8, r: 2, fill: "rgba(255,255,255,0.6)" }),
+        circle({ cx: 3, cy: -35 - sin(t / 10 + 1) * 8, r: 3, fill: "rgba(255,255,255,0.4)" }),
+        circle({ cx: 7, cy: -28 - sin(t / 10 + 2) * 8, r: 2, fill: "rgba(255,255,255,0.5)" }),
+        circle({ cx: 0, cy: -20, r: 8, fill: "#ffcc88" }),
+        rect({ x: -5, y: -12, width: 10, height: 20, rx: 3, fill: this.color }),
+      );
+    }
+
     const bob = this.attached ? 0 : sin(t / 50 + this.phase) * 1.5;
     const waveL = sin(t / 12 + this.phase) * 10;
     const waveR = sin(t / 12 + this.phase + 2) * 10;
@@ -943,6 +973,71 @@ setInterval(() => {
   t = (t + 40) % 360;
   objs.forEach((o) => o.move(pressedKeys));
   //console.log(pressedKeys);
+
+  // Blitz-System
+  if (screenFlash > 0) screenFlash = max(0, screenFlash - 0.15);
+
+  if (random() < 0.025) {
+    const viewX = heli ? heli.pos.x : innerWidth / 2;
+    const strikeX = viewX + (random() - 0.5) * innerWidth * 1.5;
+    const strikeY = innerHeight - 50 - random() * 100;
+
+    // Zackiger Blitz von oben nach unten
+    const numSegs = 6 + Math.floor(random() * 6);
+    const topX = strikeX + (random() - 0.5) * 200;
+    const segments = [{ x: topX, y: -50 }];
+    for (let i = 1; i <= numSegs; i++) {
+      const frac = i / numSegs;
+      segments.push({
+        x: topX + (strikeX - topX) * frac + (random() - 0.5) * 80 * (1 - frac),
+        y: -50 + (strikeY + 50) * frac,
+      });
+    }
+
+    // Verzweigungen
+    const branches = [];
+    for (let i = 1; i < segments.length - 1; i++) {
+      if (random() > 0.5) {
+        const angle = (random() - 0.5) * PI * 0.8;
+        const len = 30 + random() * 60;
+        branches.push({
+          from: segments[i],
+          to: { x: segments[i].x + cos(angle) * len, y: segments[i].y + sin(angle) * len * 0.5 + len * 0.3 },
+        });
+      }
+    }
+
+    const bolt = { segments, branches, strikeX, strikeY, life: 6 };
+    lightnings.push(bolt);
+    screenFlash = 1;
+
+    // Trifft Hubschrauber?
+    if (heli && !heli.crashed) {
+      const dx = strikeX - heli.pos.x;
+      const dy = strikeY - heli.pos.y;
+      if (dx * dx + dy * dy < 120 * 120) {
+        heli.crash();
+      }
+    }
+
+    // Trifft Person?
+    for (const obj of objs) {
+      if (obj.sunk !== undefined && !obj.rescued && !obj.attached && !obj.sunk) {
+        const dx = strikeX - obj.worldX;
+        const dy = strikeY - obj.worldY;
+        if (dx * dx + dy * dy < 100 * 100) {
+          obj.sunk = true;
+          obj.sinkProgress = 0;
+        }
+      }
+    }
+  }
+
+  // Blitze aktualisieren
+  for (let i = lightnings.length - 1; i >= 0; i--) {
+    lightnings[i].life--;
+    if (lightnings[i].life <= 0) lightnings.splice(i, 1);
+  }
 
   m.redraw();
 }, 50);
@@ -977,6 +1072,25 @@ m.mount(document.body, {
         PERSON_POSITIONS.map((wx, i) =>
           m(Person, { key: wx, wx, color: PERSON_COLORS[i] })
         ),
+        // Blitze
+        lightnings.map((bolt) => {
+          const opacity = bolt.life / 6;
+          const d = "M" + bolt.segments.map(s => `${s.x},${s.y}`).join(" L");
+          return g(
+            path({ d, fill: "none", stroke: `rgba(180,180,255,${0.3 * opacity})`, "stroke-width": "12", "stroke-linecap": "round" }),
+            path({ d, fill: "none", stroke: `rgba(220,220,255,${0.9 * opacity})`, "stroke-width": "3", "stroke-linecap": "round" }),
+            path({ d, fill: "none", stroke: `rgba(255,255,255,${opacity})`, "stroke-width": "1.5", "stroke-linecap": "round" }),
+            bolt.branches.map(b =>
+              g(
+                line({ x1: b.from.x, y1: b.from.y, x2: b.to.x, y2: b.to.y,
+                  stroke: `rgba(200,200,255,${0.6 * opacity})`, "stroke-width": "2", "stroke-linecap": "round" }),
+                line({ x1: b.from.x, y1: b.from.y, x2: b.to.x, y2: b.to.y,
+                  stroke: `rgba(180,180,255,${0.2 * opacity})`, "stroke-width": "6", "stroke-linecap": "round" }),
+              )
+            ),
+            circle({ cx: bolt.strikeX, cy: bolt.strikeY, r: 20 * opacity, fill: `rgba(255,220,150,${0.5 * opacity})` }),
+          );
+        }),
       ),
       m(Helicopter),
       m(Controls),
@@ -987,6 +1101,8 @@ m.mount(document.body, {
           `Gerettet: ${rescued} / ${PERSON_POSITIONS.length}`
         ),
       ),
+      // Blitz-Flash
+      screenFlash > 0 ? rect({ x: 0, y: 0, width: innerWidth, height: innerHeight, fill: "#fff", opacity: screenFlash * 0.15 }) : g(),
       // Crash-Overlay: Risse + Text
       heli && heli.crashed ? g(
         // Risse
