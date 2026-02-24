@@ -108,6 +108,14 @@ function resetGame() {
   heli.acc = p(0, 0);
   heli.dir = -1;
   heli.length = 50;
+
+  // Personen zurücksetzen die am Seil hingen
+  for (const obj of objs) {
+    if (obj.attached !== undefined && obj.attached) {
+      obj.attached = false;
+      obj.worldY = obj.waterY;
+    }
+  }
 }
 
 function handleKeydown(e) {
@@ -845,6 +853,15 @@ class Person extends Stuff {
       return;
     }
     if (!heli) return;
+
+    // Bei Crash: Person fällt vom Seil zurück ins Wasser
+    if (heli.crashed) {
+      if (this.attached) {
+        this.attached = false;
+        this.worldY = this.waterY;
+      }
+      return;
+    }
 
     if (this.attached) {
       this.worldX = heli.pos.x;
