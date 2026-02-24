@@ -17,6 +17,11 @@ const {
 } = tagl(m);
 const { sin, cos, PI, min, max, random } = Math;
 let t = 0;
+let heli = null;
+let rescued = 0;
+
+const PERSON_POSITIONS = [800, 1400, 2200, 3000, 4000];
+const PERSON_COLORS = ["#ff6633", "#ff3366", "#ffcc00", "#33ccff", "#cc66ff"];
 
 const p = (x, y) => ({ x, y });
 const add = (p1, p2) => p(p1.x + p2.x, p1.y + p2.y);
@@ -216,6 +221,7 @@ class Helicopter extends Stuff {
 
   constructor() {
     super();
+    heli = this;
     console.log(this.pos);
   }
 
@@ -283,6 +289,11 @@ class Helicopter extends Stuff {
         "stroke-width": "6",
         "stroke-linecap": "round",
       }),
+      // Rettungshaken
+      g({ transform: `translate(0 ${this.length})` },
+        circle({ cx: 0, cy: 0, r: 6, fill: "#ff6633", stroke: "#333", "stroke-width": 2 }),
+        path({ d: "M-5,4 Q-8,14 0,12 Q8,14 5,4", fill: "none", stroke: "#333", "stroke-width": 2.5, "stroke-linecap": "round" }),
+      ),
       g(
         { transform: `rotate(${satv(this.speed.x * this.dir, -30, 30)})` },
         //point,
@@ -648,6 +659,86 @@ class Lake extends Background {
   shiftX = 13500;
 }
 
+class Person extends Stuff {
+  phase = random() * PI * 2;
+  rescued = false;
+  attached = false;
+  rescueX = 0;
+
+  oninit(vnode) {
+    this.worldX = vnode.attrs.wx;
+    this.color = vnode.attrs.color || "#ff6633";
+    this.waterY = innerHeight - 60;
+    this.worldY = this.waterY;
+  }
+
+  move() {
+    if (this.rescued || !heli) return;
+
+    if (this.attached) {
+      this.worldX = heli.pos.x;
+      this.worldY = heli.pos.y + heli.length + 30;
+
+      // Gerettet wenn nahe am Helipad/Zelt abgesetzt
+      if (this.worldX > -50 && this.worldX < 500 && this.worldY > innerHeight - 100) {
+        this.rescued = true;
+        this.attached = false;
+        this.rescueX = 220 + rescued * 28;
+        rescued++;
+      }
+      return;
+    }
+
+    // Seilende nah genug? Dann festhalten!
+    const ropeTipX = heli.pos.x;
+    const ropeTipY = heli.pos.y + heli.length;
+    const dx = ropeTipX - this.worldX;
+    const dy = ropeTipY - this.worldY;
+    if (dx * dx + dy * dy < 50 * 50) {
+      this.attached = true;
+    }
+  }
+
+  view() {
+    if (this.rescued) {
+      // Gerettete Person steht beim Zelt
+      return g(
+        { transform: `translate(${this.rescueX} ${innerHeight - 75})` },
+        circle({ cx: 0, cy: -28, r: 7, fill: "#ffcc88" }),
+        rect({ x: -4, y: -21, width: 8, height: 18, rx: 2, fill: this.color }),
+        line({ x1: -3, y1: -1, x2: -6, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
+        line({ x1: 3, y1: -1, x2: 6, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
+      );
+    }
+
+    const bob = this.attached ? 0 : sin(t / 30 + this.phase) * 6;
+    const waveL = sin(t / 8 + this.phase) * 12;
+    const waveR = sin(t / 8 + this.phase + 2) * 12;
+
+    return g(
+      { transform: `translate(${this.worldX} ${this.worldY + bob})` },
+      // Wasser-Spritzer
+      !this.attached &&
+        ellipse({ cx: 0, cy: 8, rx: 18, ry: 5, fill: "rgba(255,255,255,0.3)" }),
+      // Kopf
+      circle({ cx: 0, cy: -20, r: 8, fill: "#ffcc88" }),
+      // Haare
+      path({ d: "M-6,-26 Q0,-32 6,-26 Q4,-22 -4,-22 Z", fill: "#553311" }),
+      // Körper
+      rect({ x: -5, y: -12, width: 10, height: 20, rx: 3, fill: this.color }),
+      // Arme winken!
+      line({
+        x1: -5, y1: -8, x2: -18, y2: -22 + waveL,
+        stroke: "#ffcc88", "stroke-width": 3, "stroke-linecap": "round",
+      }),
+      line({
+        x1: 5, y1: -8, x2: 18, y2: -22 + waveR,
+        stroke: "#ffcc88", "stroke-width": 3, "stroke-linecap": "round",
+      }),
+    );
+  }
+}
+
 setInterval(() => {
   t = (t + 40) % 360;
   objs.forEach((o) => o.move(pressedKeys));
@@ -664,13 +755,13 @@ m.mount(document.body, {
       g(
         {
           transform: `translate(${
-            (objs[2] ? -objs[2].pos.x : 0) + innerWidth * 0.5
+            (heli ? -heli.pos.x : 0) + innerWidth * 0.5
           } 0)`,
         },
         g(
           {
             transform: `translate(${
-              (objs[2] ? 0.75 * objs[2].pos.x : 0) + innerWidth * 0.5
+              (heli ? 0.75 * heli.pos.x : 0) + innerWidth * 0.5
             } -400)`,
           },
           m(Background, { color: "rgba(43, 44, 45, 1)" })
@@ -683,9 +774,19 @@ m.mount(document.body, {
         m(Tent),
         m(House),
         m(Helipad),
+        PERSON_POSITIONS.map((wx, i) =>
+          m(Person, { key: wx, wx, color: PERSON_COLORS[i] })
+        ),
       ),
       m(Helicopter),
-      m(Controls)
+      m(Controls),
+      // Rettungs-Anzeige
+      g({ transform: `translate(${innerWidth - 220} 45)` },
+        rect({ x: -10, y: -28, width: 220, height: 40, rx: 8, fill: "rgba(0,0,0,0.5)" }),
+        text({ x: 0, y: 0, fill: "#fff", "font-size": "22", "font-family": "sans-serif", "font-weight": "bold" },
+          `Gerettet: ${rescued} / ${PERSON_POSITIONS.length}`
+        ),
+      ),
     ),
     audio({ src: rotorSound, autoplay: true, loop: true }),
     audio({ src: music, autoplay: true, loop: true }),
