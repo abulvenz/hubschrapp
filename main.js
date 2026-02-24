@@ -664,6 +664,7 @@ class Person extends Stuff {
   rescued = false;
   attached = false;
   rescueX = 0;
+  walkProgress = 0;
 
   oninit(vnode) {
     this.worldX = vnode.attrs.wx;
@@ -673,7 +674,11 @@ class Person extends Stuff {
   }
 
   move() {
-    if (this.rescued || !heli) return;
+    if (this.rescued) {
+      if (this.walkProgress < 1) this.walkProgress += 0.015;
+      return;
+    }
+    if (!heli) return;
 
     if (this.attached) {
       this.worldX = heli.pos.x;
@@ -701,19 +706,31 @@ class Person extends Stuff {
 
   view() {
     if (this.rescued) {
-      // Gerettete Person steht beim Zelt
+      const wp = min(this.walkProgress, 1);
+      // Zielposition: Zelteingang (320+91=411, innerHeight-60)
+      const targetX = 411;
+      const targetY = innerHeight - 63;
+      const startY = innerHeight - 75;
+      const cx = this.rescueX + (targetX - this.rescueX) * wp;
+      const cy = startY + (targetY - startY) * wp;
+
+      // Im Zelt angekommen → verschwinden
+      if (wp >= 1) return g();
+
+      // Lauf-Animation: Beine schwingen
+      const legSwing = sin(t / 6) * 5;
       return g(
-        { transform: `translate(${this.rescueX} ${innerHeight - 75})` },
+        { transform: `translate(${cx} ${cy})` },
         circle({ cx: 0, cy: -28, r: 7, fill: "#ffcc88" }),
         rect({ x: -4, y: -21, width: 8, height: 18, rx: 2, fill: this.color }),
-        line({ x1: -3, y1: -1, x2: -6, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
-        line({ x1: 3, y1: -1, x2: 6, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
+        line({ x1: -3, y1: -1, x2: -6 + legSwing, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
+        line({ x1: 3, y1: -1, x2: 6 - legSwing, y2: 12, stroke: "#555", "stroke-width": 2.5 }),
       );
     }
 
-    const bob = this.attached ? 0 : sin(t / 30 + this.phase) * 6;
-    const waveL = sin(t / 8 + this.phase) * 12;
-    const waveR = sin(t / 8 + this.phase + 2) * 12;
+    const bob = this.attached ? 0 : sin(t / 50 + this.phase) * 1.5;
+    const waveL = sin(t / 12 + this.phase) * 10;
+    const waveR = sin(t / 12 + this.phase + 2) * 10;
 
     return g(
       { transform: `translate(${this.worldX} ${this.worldY + bob})` },
